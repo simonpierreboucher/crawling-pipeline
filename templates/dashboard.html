@@ -1,0 +1,470 @@
+<!-- templates/dashboard.html -->
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Tableau de Bord du Web Crawler</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/socket.io/3.1.3/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f6f9;
+            margin: 0;
+            padding: 0;
+            color: #333;
+        }
+        header {
+            background-color: #4a90e2;
+            color: white;
+            padding: 20px 40px;
+            text-align: center;
+        }
+        .container {
+            padding: 20px 40px;
+        }
+        .controls {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .controls h2 {
+            margin-top: 0;
+        }
+        .controls form {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 20px;
+        }
+        .controls label {
+            display: flex;
+            flex-direction: column;
+            font-weight: bold;
+        }
+        .controls input[type="text"],
+        .controls input[type="number"] {
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            margin-top: 5px;
+        }
+        .controls input[type="checkbox"] {
+            margin-top: 15px;
+            transform: scale(1.2);
+            margin-left: 5px;
+        }
+        .controls button {
+            padding: 10px 20px;
+            background-color: #4a90e2;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s ease;
+        }
+        .controls button:hover {
+            background-color: #357ab8;
+        }
+        .controls .button-group {
+            display: flex;
+            gap: 10px;
+            grid-column: span 2;
+            justify-content: flex-start;
+        }
+        .counters, .charts {
+            margin-top: 30px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .counters {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .counters h2, .charts h2 {
+            margin-top: 0;
+        }
+        .counters div {
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        .counters div span {
+            font-weight: bold;
+            color: #4a90e2;
+        }
+        .charts canvas {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 20px;
+        }
+        footer {
+            text-align: center;
+            padding: 20px 0;
+            background-color: #f4f6f9;
+            color: #777;
+            margin-top: 40px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Tableau de Bord du Web Crawler</h1>
+    </header>
+
+    <div class="container">
+        <div class="controls">
+            <h2>Configuration</h2>
+            <form id="config-form">
+                <label>
+                    URL de départ:
+                    <input type="text" name="start_url" value="https://example.com" required>
+                </label>
+                <label>
+                    Profondeur maximale:
+                    <input type="number" name="max_depth" value="3" min="1" required>
+                </label>
+                <label>
+                    <span>Utiliser Playwright:</span>
+                    <input type="checkbox" name="use_playwright">
+                </label>
+                <label>
+                    <span>Télécharger les PDFs:</span>
+                    <input type="checkbox" name="download_pdf" checked>
+                </label>
+                <label>
+                    <span>Télécharger les Documents:</span>
+                    <input type="checkbox" name="download_doc" checked>
+                </label>
+                <label>
+                    <span>Télécharger les Images:</span>
+                    <input type="checkbox" name="download_image" checked>
+                </label>
+                <label>
+                    <span>Télécharger les Autres Fichiers:</span>
+                    <input type="checkbox" name="download_other" checked>
+                </label>
+                <label>
+                    Fournisseur LLM:
+                    <input type="text" name="llm_provider">
+                </label>
+                <label>
+                    Clés API OpenAI (séparées par des espaces):
+                    <input type="text" name="openai_api_keys">
+                </label>
+                <label>
+                    Nombre maximum de tokens par requête:
+                    <input type="number" name="max_tokens" value="1000" min="1">
+                </label>
+                <label>
+                    Nombre maximum d'URLs à crawler:
+                    <input type="number" name="max_urls" value="1000" min="1">
+                </label>
+                <label>
+                    Répertoire de sortie:
+                    <input type="text" name="crawler_output_dir" value="crawler_output">
+                </label>
+                <label>
+                    Fichier de checkpoint:
+                    <input type="text" name="checkpoint_file" value="checkpoint.json">
+                </label>
+                <label>
+                    <span>Activer les logs détaillés:</span>
+                    <input type="checkbox" name="verbose">
+                </label>
+                <div class="button-group">
+                    <button type="submit">Démarrer le Crawler</button>
+                    <button type="button" id="stop-button" style="background-color: #e94e77;">Arrêter le Crawler</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="counters">
+            <h2>Progression</h2>
+            <div>Total URLs trouvées: <span id="total-urls">0</span></div>
+            <div>Pages traitées: <span id="pages-processed">0</span></div>
+            <div>Fichiers téléchargés:
+                <ul>
+                    <li>PDF: <span id="pdf-downloaded">0</span></li>
+                    <li>Image: <span id="image-downloaded">0</span></li>
+                    <li>Doc: <span id="doc-downloaded">0</span></li>
+                    <li>Archive: <span id="archive-downloaded">0</span></li>
+                    <li>Audio: <span id="audio-downloaded">0</span></li>
+                    <li>Video: <span id="video-downloaded">0</span></li>
+                </ul>
+            </div>
+            <div>Fichiers échoués: <span id="files-failed">0</span></div>
+        </div>
+
+        <div class="charts">
+            <h2>Graphiques en Temps Réel</h2>
+            <canvas id="urlsChart"></canvas>
+            <canvas id="downloadsChart"></canvas>
+            <canvas id="errorsChart"></canvas>
+        </div>
+    </div>
+
+    <footer>
+        &copy; 2024 Votre Nom. Tous droits réservés.
+    </footer>
+
+    <script>
+        const socket = io();
+
+        const totalUrlsElem = document.getElementById('total-urls');
+        const pagesProcessedElem = document.getElementById('pages-processed');
+        const pdfDownloadedElem = document.getElementById('pdf-downloaded');
+        const imageDownloadedElem = document.getElementById('image-downloaded');
+        const docDownloadedElem = document.getElementById('doc-downloaded');
+        const archiveDownloadedElem = document.getElementById('archive-downloaded');
+        const audioDownloadedElem = document.getElementById('audio-downloaded');
+        const videoDownloadedElem = document.getElementById('video-downloaded');
+        const filesFailedElem = document.getElementById('files-failed');
+
+        // Initialize counters
+        let counters = {
+            total_urls: 0,
+            pages_processed: 0,
+            pdf_downloaded: 0,
+            image_downloaded: 0,
+            doc_downloaded: 0,
+            archive_downloaded: 0,
+            audio_downloaded: 0,
+            video_downloaded: 0,
+            files_failed: 0
+        };
+
+        // Initialize Charts
+        const urlsCtx = document.getElementById('urlsChart').getContext('2d');
+        const downloadsCtx = document.getElementById('downloadsChart').getContext('2d');
+        const errorsCtx = document.getElementById('errorsChart').getContext('2d');
+
+        const urlsChart = new Chart(urlsCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Total URLs Found',
+                    data: [],
+                    borderColor: '#4a90e2',
+                    backgroundColor: 'rgba(74, 144, 226, 0.2)',
+                    fill: true,
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Temps'
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Nombre d\'URLs'
+                        }
+                    }
+                }
+            }
+        });
+
+        const downloadsChart = new Chart(downloadsCtx, {
+            type: 'bar',
+            data: {
+                labels: ['PDF', 'Image', 'Doc', 'Archive', 'Audio', 'Video'],
+                datasets: [{
+                    label: 'Fichiers Téléchargés',
+                    data: [0, 0, 0, 0, 0, 0],
+                    backgroundColor: [
+                        '#e74c3c',
+                        '#f39c12',
+                        '#f1c40f',
+                        '#2ecc71',
+                        '#3498db',
+                        '#9b59b6'
+                    ],
+                    borderColor: '#fff',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Nombre de Fichiers'
+                        }
+                    }
+                }
+            }
+        });
+
+        const errorsChart = new Chart(errorsCtx, {
+            type: 'pie',
+            data: {
+                labels: ['Fichiers Échoués'],
+                datasets: [{
+                    data: [0],
+                    backgroundColor: ['#95a5a6']
+                }]
+            },
+            options: {
+                responsive: true
+            }
+        });
+
+        // Handle status updates from server
+        socket.on('status_update', function(msg) {
+            const event = msg.event;
+            const data = msg.data;
+
+            switch(event) {
+                case 'urls_found':
+                    counters.total_urls += data.count;
+                    totalUrlsElem.innerText = counters.total_urls;
+                    urlsChart.data.labels.push(new Date().toLocaleTimeString());
+                    urlsChart.data.datasets[0].data.push(counters.total_urls);
+                    urlsChart.update();
+                    break;
+                case 'pages_processed':
+                    counters.pages_processed += 1;
+                    pagesProcessedElem.innerText = counters.pages_processed;
+                    break;
+                case 'download_completed':
+                    const fileType = data.file_type;
+                    const elementId = fileType.toLowerCase() + '_downloaded';
+                    if (counters.hasOwnProperty(elementId)) {
+                        counters[elementId] += 1;
+                        document.getElementById(elementId).innerText = counters[elementId];
+                        // Update downloads chart
+                        const index = ['pdf', 'image', 'doc', 'archive', 'audio', 'video'].indexOf(fileType.toLowerCase());
+                        if (index !== -1) {
+                            downloadsChart.data.datasets[0].data[index] = counters[elementId];
+                            downloadsChart.update();
+                        }
+                    }
+                    break;
+                case 'download_failed':
+                    counters.files_failed += 1;
+                    filesFailedElem.innerText = counters.files_failed;
+                    errorsChart.data.datasets[0].data = [counters.files_failed];
+                    errorsChart.update();
+                    break;
+                case 'crawl_started':
+                    // Reset counters
+                    counters = {
+                        total_urls: 0,
+                        pages_processed: 0,
+                        pdf_downloaded: 0,
+                        image_downloaded: 0,
+                        doc_downloaded: 0,
+                        archive_downloaded: 0,
+                        audio_downloaded: 0,
+                        video_downloaded: 0,
+                        files_failed: 0
+                    };
+                    totalUrlsElem.innerText = counters.total_urls;
+                    pagesProcessedElem.innerText = counters.pages_processed;
+                    pdfDownloadedElem.innerText = counters.pdf_downloaded;
+                    imageDownloadedElem.innerText = counters.image_downloaded;
+                    docDownloadedElem.innerText = counters.doc_downloaded;
+                    archiveDownloadedElem.innerText = counters.archive_downloaded;
+                    audioDownloadedElem.innerText = counters.audio_downloaded;
+                    videoDownloadedElem.innerText = counters.video_downloaded;
+                    filesFailedElem.innerText = counters.files_failed;
+
+                    urlsChart.data.labels = [];
+                    urlsChart.data.datasets[0].data = [];
+                    urlsChart.update();
+
+                    downloadsChart.data.datasets[0].data = [0,0,0,0,0,0];
+                    downloadsChart.update();
+
+                    errorsChart.data.datasets[0].data = [0];
+                    errorsChart.update();
+                    break;
+                case 'crawl_completed':
+                    // Optionally handle crawl completion
+                    emit('crawl_completed', {'duration': data.duration, 'status': data.status});
+                    break;
+                // Handle other events as needed
+                default:
+                    console.log('Unknown event:', event);
+            }
+        });
+
+        // Handle form submission
+        document.getElementById('config-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const form = e.target;
+            const formData = new FormData(form);
+            const config = {
+                start_url: formData.get('start_url'),
+                max_depth: formData.get('max_depth'),
+                use_playwright: formData.get('use_playwright') === 'on',
+                download_pdf: formData.get('download_pdf') === 'on',
+                download_doc: formData.get('download_doc') === 'on',
+                download_image: formData.get('download_image') === 'on',
+                download_other: formData.get('download_other') === 'on',
+                llm_provider: formData.get('llm_provider'),
+                openai_api_keys: formData.get('openai_api_keys').split(' ').filter(k => k),
+                max_tokens: formData.get('max_tokens'),
+                max_urls: formData.get('max_urls'),
+                crawler_output_dir: formData.get('crawler_output_dir'),
+                checkpoint_file: formData.get('checkpoint_file'),
+                verbose: formData.get('verbose') === 'on'
+            };
+
+            // Envoyer la requête POST pour démarrer le crawler
+            fetch('/start', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(config)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if(data.status === 'success') {
+                    alert('Crawler démarré avec succès.');
+                } else {
+                    alert('Erreur: ' + data.message);
+                }
+            })
+            .catch((error) => {
+                console.error('Error:', error);
+                alert('Erreur lors du démarrage du crawler.');
+            });
+        });
+
+        // Gérer le bouton d'arrêt
+        document.getElementById('stop-button').addEventListener('click', function() {
+            fetch('/stop', {
+                method: 'POST',
+            })
+            .then(response => response.json())
+            .then(data => {
+                if(data.status === 'success') {
+                    alert('Crawler arrêté avec succès.');
+                } else {
+                    alert('Erreur: ' + data.message);
+                }
+            })
+            .catch((error) => {
+                console.error('Error:', error);
+                alert('Erreur lors de l\'arrêt du crawler.');
+            });
+        });
+    </script>
+</body>
+</html>
